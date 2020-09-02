@@ -13,10 +13,11 @@ click = "^7.1.1"
 pytest = "^5.2"
 black = "^19.10b0"
 flake8 = "^3.7.9"
+colorama = "^0.4.3"
 
+[tool.poetry.scripts]
+yari-search = "yari_search.main:main"
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
 
-[tool.poetry.scripts]
-yari-search = "yari_search.main:main"

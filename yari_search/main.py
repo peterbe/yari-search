@@ -1,10 +1,11 @@
-import time
 import json
+import time
 from pathlib import Path
 
 import click
-from elasticsearch_dsl.connections import connections
 from elasticsearch.helpers import streaming_bulk
+from elasticsearch_dsl.connections import connections
+from elasticsearch_dsl.query import MultiMatch
 
 from yari_search import models
 
@@ -18,28 +19,56 @@ def main(hosts):
 
 
 @main.command()
-@click.option("--autocomplete", is_flag=True)
+@click.option("--show-highlights", is_flag=True)
 @click.argument("text")
-def search(text, autocomplete=False):
+def search(text, show_highlights=False):
     """Search with the CLI"""
     # print(repr(text))
 
     s = models.Doc.search()
-    s = s.suggest("title_suggestions", text, completion={"field": "title_suggest"})
+    s = s.suggest("title_suggestions", text, term={"field": "title"})
+    s = s.suggest("body_suggestions", text, term={"field": "body"})
     t0 = time.time()
     response = s.execute()
     t1 = time.time()
+    good_suggestions = []
+    _good_suggestions = set()  # hash for uniqueness
     for result in response.suggest.title_suggestions:
         for i, option in enumerate(result.options):
-            if not i:
-                print(f"Suggestions for {result.text}:")
-            print(f"\t{option.text}", option._score)
+            # if not i:
+            #     print(f"Title Suggestions for {result.text}:")
+            if option.score > 0.75 and option.text not in _good_suggestions:
+                good_suggestions.append(option.text)
+                _good_suggestions.add(option.text.lower())
+    for result in response.suggest.body_suggestions:
+        for i, option in enumerate(result.options):
+            # if not i:
+            #     print(f"Body Suggestions for {result.text}:")
+            if option.score > 0.75 and option.text not in _good_suggestions:
+                good_suggestions.append(option.text)
+                _good_suggestions.add(option.text.lower())
+            # print(f"\t{option.text}", option.score)
+
+    if good_suggestions:
+        click.echo(click.style("Did you mean...", bold=True))
+        for suggestion in good_suggestions:
+            click.echo(click.style(f"\t{suggestion}", fg="yellow") + "?")
 
     s = models.Doc.search()
-    # s = s.query("match", title_suggest=text)
-    # s = s.query("match", title=text)
+
+    if show_highlights:
+        # s = s.highlight_options(order="score")
+        s = s.highlight_options(
+            pre_tags=["<mark>"],
+            post_tags=["</mark>"],
+            number_of_fragments=4,
+            fragment_size=80,
+            encoder="html",
+        )
+        s = s.highlight("title")
+        s = s.highlight("body")
+
     s = s.query("multi_match", query=text, fields=["title", "body"])
-    # s = s.query("match_phrase", body=text)
 
     s = s.sort("-popularity", "_score")
     # s = s.sort("-popularity")
@@ -51,17 +80,36 @@ def search(text, autocomplete=False):
     click.echo(
         f"{response.hits.total.value:,} pages found in took {our_took * 1000:.1f}ms"
     )
+
+    from colorama import Fore, Back, Style
+
     for hit in response:
         # If you use '_score' in your `.sort()` (e.g. `s.sort("-popularity", "_score")`)
         # then you can use `hit.meta.score`. Or, if you don't specify a `.sort()`
         # at all.
 
         click.echo(
-            f"{hit.title:<50}"
-            # repr(hit.title).ljust(50),
-            f"{hit.slug:<70}"
-            f"{round(hit.popularity, 6)}",
+            click.style(
+                f"{hit.title:<50}"
+                # repr(hit.title).ljust(50),
+                f"{hit.slug:<70}",
+                bold=True,
+            )
+            + f"{round(hit.popularity, 6)}",
         )
+
+        if show_highlights:
+            # for fragment in hit.meta.highlight.title:
+            #     print("TITLE:", repr(fragment))
+            for fragment in hit.meta.highlight.body:
+                # print(repr(fragment))
+                click.echo(
+                    fragment.replace("<mark>", Back.LIGHTYELLOW_EX + Fore.BLACK)
+                    .replace("</mark>", Style.RESET_ALL)
+                    .strip()
+                    .replace("\n", " ")
+                )
+            click.echo("")
 
 
 @main.command()
@@ -110,7 +158,7 @@ def to_search(file):
     return models.Doc(
         _id=doc["mdn_url"],
         title=doc["title"],
-        title_suggest=doc["title"],
+        # title_suggest=doc["title"],
         body="\n".join(
             x["value"]["content"] for x in doc["body"] if x["type"] == "prose"
         ),

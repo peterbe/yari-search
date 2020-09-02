@@ -1,39 +1,44 @@
 from elasticsearch_dsl import (
-    Completion,
-    # Date,
     Document,
     Float,
-    # Integer,
     Keyword,
+    # SearchAsYouType,
     Text,
     analyzer,
+    # token_filter,
 )
 
-html_strip = analyzer(
-    "html_strip",
+text_analyzer = analyzer(
+    "text_analyzer",
     tokenizer="standard",
-    filter=["standard", "lowercase", "stop", "snowball"],
+    filter=["lowercase", "stop", "snowball"],
+    # filter=["lowercase", "snowball"],
     char_filter=["html_strip"],
+)
+
+# my_custom_html_strip_char_filter = token_filter(
+#     "my_custom_html_strip_char_filter",
+#     type="html_strip",
+#     escaped_tags=["b", "a", "em", "i", "p"],
+# )
+
+
+html_text_analyzer = analyzer(
+    "html_text_analyzer",
+    tokenizer="standard",
+    # filter=["lowercase", "stop", "snowball"],
+    filter=["lowercase", "snowball"],
+    # char_filter=[my_custom_html_strip_char_filter],
 )
 
 
 class Doc(Document):
-    title = Text()
-    title_suggest = Completion()
-    body = Text()
+    title = Text(required=True, analyzer=html_text_analyzer)
+    # title_autocomplete = SearchAsYouType(max_shingle_size=3)
+    body = Text(analyzer=text_analyzer)
     locale = Keyword()
     slug = Keyword()
     popularity = Float()
 
     class Index:
         name = "yari_doc"
-        # settings = {
-        #   "number_of_shards": 2,
-        # }
-
-    # def save(self, ** kwargs):
-    #     self.lines = len(self.body.split())
-    #     return super(Article, self).save(** kwargs)
-
-    # def is_published(self):
-    #     return datetime.now() >= self.published_from
