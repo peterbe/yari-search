@@ -8,27 +8,30 @@ from elasticsearch_dsl import (
     # token_filter,
 )
 
+# Reminder!! If you debug analyzers with the (sample) command:
+#
+#    poetry run yari-search analyze text_analyzer "<video>"
+#
+# But remember, you have to re-index before any edits here take effect.
+
 text_analyzer = analyzer(
     "text_analyzer",
     tokenizer="standard",
-    filter=["lowercase", "stop", "snowball"],
-    # filter=["lowercase", "snowball"],
-    char_filter=["html_strip"],
+    # The "asciifolding" token filter makes it so that
+    # typing "bézier" becomes the same as searching for "bezier"
+    # https://www.elastic.co/guide/en/elasticsearch/reference/7.9/analysis-asciifolding-tokenfilter.html
+    filter=["lowercase", "stop", "asciifolding"],
+    # char_filter=["html_strip"],
 )
-
-# my_custom_html_strip_char_filter = token_filter(
-#     "my_custom_html_strip_char_filter",
-#     type="html_strip",
-#     escaped_tags=["b", "a", "em", "i", "p"],
-# )
-
 
 html_text_analyzer = analyzer(
     "html_text_analyzer",
     tokenizer="standard",
-    # filter=["lowercase", "stop", "snowball"],
-    filter=["lowercase", "snowball"],
-    # char_filter=[my_custom_html_strip_char_filter],
+    filter=["lowercase", "asciifolding", "stop", "snowball"],
+    # It's important that you don't use `char_filter=["html_strip"]`
+    # on the titles. For example, there are titles like `<video>`.
+    # If you do `GET /_analyze` on that with or without the html_strip
+    # char filter is the difference between getting `["video"]` and `[]`.
 )
 
 

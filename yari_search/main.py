@@ -3,9 +3,11 @@ import time
 from pathlib import Path
 
 import click
+from pyquery import PyQuery as pq
 from elasticsearch.helpers import streaming_bulk
 from elasticsearch_dsl.connections import connections
-from elasticsearch_dsl.query import MultiMatch
+
+# from elasticsearch_dsl.query import MultiMatch
 
 from yari_search import models
 
@@ -19,9 +21,21 @@ def main(hosts):
 
 
 @main.command()
-@click.option("--show-highlights", is_flag=True)
+@click.argument("analyzer")
 @click.argument("text")
-def search(text, show_highlights=False):
+def analyze(text, analyzer):
+    index = models.Doc._index
+    from pprint import pprint
+
+    pprint(index.analyze(body={"text": text, "analyzer": analyzer}))
+
+
+@main.command()
+@click.option("--show-highlights", is_flag=True)
+@click.option("--locale")
+@click.option("--debug", is_flag=True)
+@click.argument("text")
+def search(text, show_highlights=False, locale=None, debug=False):
     """Search with the CLI"""
     # print(repr(text))
 
@@ -56,22 +70,44 @@ def search(text, show_highlights=False):
 
     s = models.Doc.search()
 
+    if locale:
+        # s = s.filter("terms", locale=[locale])
+        s = s.filter("term", locale=locale)
+
     if show_highlights:
         # s = s.highlight_options(order="score")
         s = s.highlight_options(
             pre_tags=["<mark>"],
             post_tags=["</mark>"],
-            number_of_fragments=4,
+            number_of_fragments=3,
             fragment_size=80,
-            encoder="html",
+            # encoder="html",
         )
-        s = s.highlight("title")
-        s = s.highlight("body")
+        s = s.highlight("title", "body")
+        # s = s.highlight("body")
 
     s = s.query("multi_match", query=text, fields=["title", "body"])
 
-    s = s.sort("-popularity", "_score")
+    # s = s.sort("-popularity", "_score")
+    s = s.sort("_score", "-popularity")
     # s = s.sort("-popularity")
+
+    # # only return the selected fields
+    # s = s.source(['title', 'body'])
+    # # don't return any fields, just the metadata
+    # s = s.source(False)
+    # # explicitly include/exclude fields
+    # s = s.source(includes=["title"], excludes=["user.*"])
+    s = s.source(excludes=["body"])
+    # # reset the field selection
+    # s = s.source(None)
+
+    s = s[:25]
+
+    if debug:
+        from pprint import pprint
+
+        pprint(s.to_dict())
 
     t0 = time.time()
     response = s.execute()
@@ -81,16 +117,28 @@ def search(text, show_highlights=False):
         f"{response.hits.total.value:,} pages found in took {our_took * 1000:.1f}ms"
     )
 
-    from colorama import Fore, Back, Style
+    from colorama import Fore, Style
 
     for hit in response:
         # If you use '_score' in your `.sort()` (e.g. `s.sort("-popularity", "_score")`)
         # then you can use `hit.meta.score`. Or, if you don't specify a `.sort()`
         # at all.
 
+        try:
+            title_fragments = hit.meta.highlight.title
+        except AttributeError:
+            title_fragments = []
+
+        title = (
+            title_fragments
+            and title_fragments[0]
+            .replace("<mark>", Fore.LIGHTYELLOW_EX)
+            .replace("</mark>", Style.RESET_ALL)
+            or hit.title
+        )
         click.echo(
             click.style(
-                f"{hit.title:<50}"
+                f"{title:<50}"
                 # repr(hit.title).ljust(50),
                 f"{hit.slug:<70}",
                 bold=True,
@@ -99,12 +147,13 @@ def search(text, show_highlights=False):
         )
 
         if show_highlights:
-            # for fragment in hit.meta.highlight.title:
-            #     print("TITLE:", repr(fragment))
-            for fragment in hit.meta.highlight.body:
-                # print(repr(fragment))
+            try:
+                body_fragments = hit.meta.highlight.body
+            except AttributeError:
+                body_fragments = []
+            for fragment in body_fragments:
                 click.echo(
-                    fragment.replace("<mark>", Back.LIGHTYELLOW_EX + Fore.BLACK)
+                    fragment.replace("<mark>", Fore.LIGHTYELLOW_EX)
                     .replace("</mark>", Style.RESET_ALL)
                     .strip()
                     .replace("\n", " ")
@@ -158,14 +207,24 @@ def to_search(file):
     return models.Doc(
         _id=doc["mdn_url"],
         title=doc["title"],
-        # title_suggest=doc["title"],
-        body="\n".join(
-            x["value"]["content"] for x in doc["body"] if x["type"] == "prose"
+        body=html_strip(
+            "\n".join(
+                x["value"]["content"]
+                for x in doc["body"]
+                if x["type"] == "prose" and x["value"]["content"]
+            )
         ),
         popularity=doc["popularity"],
         slug=slug,
         locale=locale,
     )
+
+
+def html_strip(text):
+    text = text.strip()
+    if not text:
+        return ""
+    return pq(text).text()
 
 
 def walk(root):
