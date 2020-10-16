@@ -33,9 +33,10 @@ def analyze(text, analyzer):
 @main.command()
 @click.option("--show-highlights", is_flag=True)
 @click.option("--locale")
+@click.option("--size", type=int)
 @click.option("--debug", is_flag=True)
 @click.argument("text")
-def search(text, show_highlights=False, locale=None, debug=False):
+def search(text, show_highlights=False, locale=None, debug=False, size=20):
     """Search with the CLI"""
     # print(repr(text))
 
@@ -51,6 +52,7 @@ def search(text, show_highlights=False, locale=None, debug=False):
         for i, option in enumerate(result.options):
             # if not i:
             #     print(f"Title Suggestions for {result.text}:")
+            # print("TITLE", option.score, option.text)
             if option.score > 0.75 and option.text not in _good_suggestions:
                 good_suggestions.append(option.text)
                 _good_suggestions.add(option.text.lower())
@@ -58,6 +60,7 @@ def search(text, show_highlights=False, locale=None, debug=False):
         for i, option in enumerate(result.options):
             # if not i:
             #     print(f"Body Suggestions for {result.text}:")
+            # print("BODY", option.score, option.text)
             if option.score > 0.75 and option.text not in _good_suggestions:
                 good_suggestions.append(option.text)
                 _good_suggestions.add(option.text.lower())
@@ -71,8 +74,10 @@ def search(text, show_highlights=False, locale=None, debug=False):
     s = models.Doc.search()
 
     if locale:
-        # s = s.filter("terms", locale=[locale])
-        s = s.filter("term", locale=locale)
+        s = s.filter("terms", locale=[locale.lower()])
+        # s = s.filter("term", locale=locale)
+
+    s = s.filter("term", archived=False)
 
     if show_highlights:
         # s = s.highlight_options(order="score")
@@ -89,6 +94,7 @@ def search(text, show_highlights=False, locale=None, debug=False):
     s = s.query("multi_match", query=text, fields=["title", "body"])
 
     # s = s.sort("-popularity", "_score")
+    # s = s.sort("archived", "_score", "-popularity")
     s = s.sort("_score", "-popularity")
     # s = s.sort("-popularity")
 
@@ -102,12 +108,12 @@ def search(text, show_highlights=False, locale=None, debug=False):
     # # reset the field selection
     # s = s.source(None)
 
-    s = s[:25]
+    s = s[:size]
 
     if debug:
         from pprint import pprint
 
-        pprint(s.to_dict())
+        print(json.dumps(s.to_dict(), indent=3))
 
     t0 = time.time()
     response = s.execute()
@@ -138,8 +144,7 @@ def search(text, show_highlights=False, locale=None, debug=False):
         )
         click.echo(
             click.style(
-                f"{title:<50}"
-                # repr(hit.title).ljust(50),
+                f"{hit.archived and Fore.RED + 'Archived' + Fore.RESET or ''} {title:<50}"
                 f"{hit.slug:<70}",
                 bold=True,
             )
@@ -207,6 +212,7 @@ def to_search(file):
     return models.Doc(
         _id=doc["mdn_url"],
         title=doc["title"],
+        archived=doc["isArchive"],
         body=html_strip(
             "\n".join(
                 x["value"]["content"]
@@ -216,7 +222,7 @@ def to_search(file):
         ),
         popularity=doc["popularity"],
         slug=slug,
-        locale=locale,
+        locale=locale.lower(),
     )
 
 

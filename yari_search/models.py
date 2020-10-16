@@ -2,6 +2,7 @@ from elasticsearch_dsl import (
     Document,
     Float,
     Keyword,
+    Boolean,
     # SearchAsYouType,
     Text,
     analyzer,
@@ -40,6 +41,7 @@ class Doc(Document):
     # title_autocomplete = SearchAsYouType(max_shingle_size=3)
     body = Text(analyzer=text_analyzer)
     locale = Keyword()
+    archived = Boolean()
     slug = Keyword()
     popularity = Float()
 
